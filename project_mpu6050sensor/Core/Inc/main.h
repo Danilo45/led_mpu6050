@@ -59,12 +59,13 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define MPU6050_SCL_Pin GPIO_PIN_6
-#define MPU6050_SCL_GPIO_Port GPIOB
-#define MPU6050_SDA_Pin GPIO_PIN_7
-#define MPU6050_SDA_GPIO_Port GPIOB
+#define MPU6050_SDA_Pin GPIO_PIN_9
+#define MPU6050_SDA_GPIO_Port GPIOC
+#define MPU6050_SCL_Pin GPIO_PIN_8
+#define MPU6050_SCL_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
+#define MPU6050_I2C_ADDR  0x68
 
 /* USER CODE END Private defines */
 
