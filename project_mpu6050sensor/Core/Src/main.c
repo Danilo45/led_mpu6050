@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "mpu6050.h"
 #include <math.h>
+#include "kalman_filter.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,6 +47,21 @@ I2C_HandleTypeDef hi2c3;
 TIM_HandleTypeDef htim4;
 
 /* USER CODE BEGIN PV */
+//variables for cube monitor
+uint32_t g_counter = 0;
+uint32_t g_channel_1_state = 32000;
+uint32_t g_channel_2_state = 16000;
+
+float roll_angle;
+float kalman_roll_angle;
+float dt;
+
+mpu6050_accel_data_t g_accel_data;
+const mpu6050_accel_data_t error_offset ={
+	.x = 250,
+	.y = -200,
+	.z = 156
+};
 
 /* USER CODE END PV */
 
@@ -60,19 +76,48 @@ static void MX_I2C3_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-//variables for cube monitor
-uint32_t g_counter = 0;
-uint32_t g_channel_1_state = 32000;
-uint32_t g_channel_2_state = 16000;
 
-float roll_angle;
+#define PWM_PULSE_MIN 0
+#define PWM_PULSE_MAX  40
 
-mpu6050_accel_data_t g_accel_data;
-const mpu6050_accel_data_t error_offset ={
-	.x = 250,
-	.y = -200,
-	.z = 156
-};
+#define ANGLE_POS_MIN 0
+#define ANGLE_POS_MAX 90
+
+
+
+// Map function: re-maps a number from one range to another
+long map(long x, long in_min, long in_max, long out_min, long out_max) {
+    // Perform  mapping
+    long result = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+
+    // Clamp the result to the output range
+    if (result > out_max) {
+        result = out_max;
+    } else if (result < out_min) {
+        result = out_min;
+    }
+
+    return result;
+}
+
+
+void change_pwm_duty_cycle(uint32_t pwm_pulse, uint8_t timer_channel) {
+	__HAL_TIM_SET_COMPARE(&htim4, timer_channel, pwm_pulse);
+}
+
+void init_cycle_counter(void) {
+    // Enable DWT (Data Watchpoint and Trace)
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    // Reset cycle counter
+    DWT->CYCCNT = 0;
+    // Enable cycle counter
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+// Function to get the current cycle count
+uint32_t get_cycle_count(void) {
+    return DWT->CYCCNT;
+}
 /* USER CODE END 0 */
 
 /**
@@ -107,6 +152,9 @@ int main(void)
   MX_TIM4_Init();
   MX_I2C3_Init();
   /* USER CODE BEGIN 2 */
+  KalmanFilter kf;
+  kalman_filter_init(&kf);
+
   if(mpu6050_init(&hi2c3, MPU6050_I2C_ADDR) != MPU6050_OK){
 	  Error_Handler();
   }
@@ -125,13 +173,17 @@ int main(void)
   	  Error_Handler();
     }
 
-
+  uint32_t previous_tick = HAL_GetTick();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  uint32_t current_tick = HAL_GetTick();
+	  dt = (current_tick - previous_tick) / 1000.0f;
+	  previous_tick = current_tick;
+
 #ifdef PWM_DEBUG
 	g_counter = __HAL_TIM_GET_COUNTER(&htim4);
 #endif
@@ -143,6 +195,16 @@ int main(void)
 	g_accel_data = mpu6050_accel_calibration(&error_offset, &g_accel_data);
 
 	roll_angle = atan2(g_accel_data.y, g_accel_data.z)* (180.0/M_PI);
+
+	kalman_roll_angle = (int16_t)kalman_filter_get_angle(&kf, roll_angle, dt);
+
+	uint8_t channel = (kalman_roll_angle < 0) ? TIM_CHANNEL_1 : TIM_CHANNEL_2;
+
+	kalman_roll_angle = (kalman_roll_angle < 0) ? -kalman_roll_angle : kalman_roll_angle;
+
+	uint32_t pwm_pulse = map(kalman_roll_angle, ANGLE_POS_MIN, ANGLE_POS_MAX, PWM_PULSE_MIN, PWM_PULSE_MAX);
+
+	change_pwm_duty_cycle(pwm_pulse, channel);
 	//HAL_Delay(500);
     /* USER CODE END WHILE */
 
